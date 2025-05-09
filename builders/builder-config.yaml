@@ -1,0 +1,5 @@
+dist:
+  name: otelcol-otelex
+  description: OTelEx Collector binary
+  output_path: /bin/otxdist
+  otelcol_version: 0.125.0
