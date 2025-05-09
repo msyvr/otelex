@@ -1,0 +1,25 @@
+# OpenTelemetry builder
+ocb
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# mac
+.DS_Store
+._.DS_Store
+**/.DS_Store
+**/._.DS_Store
