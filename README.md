@@ -159,6 +159,16 @@ The manifest is provided to the `--config` flag when the run command for the Col
 #### Local deploy
 Local deploy is generally just useful for quick tests. Docker deploys are easy enough, so I default to using those locally, too.
 
+Locally, run the binary with the `config` flag:
+
+```bash
+otelcol-custom --config /path/to/config-filename.yaml
+```
+
+>Validate the config file: Running the above with`validate` preceding `--config` will check that the provided config file aligns with a valid OpenTelemetry Collector configuration.
+
+>Chained config flags are merged: Multiple `--config` flags will be merged into a single configuration; if the merger doesn't yield a complete configuration, the command will error.
+
 Alternatives for loading the configuration include environment variables:
 
 ```bash
@@ -172,8 +182,6 @@ otelcol-custom --config=https://my-domain.com/config-filename.yaml
 ```bash
 otelcol-custom --config="yaml:exporters::custom-exporter"
 ```
-
-nb: Multiple `--config` flags will be merged into a single configuration; if the merger doesn't yield a complete configuration, the command will error.
 
 #### Docker deploy
 
