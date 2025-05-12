@@ -4,7 +4,7 @@
 
 This is an exercise to build a custom Open Telemetry Collector distribution that includes a custom exporter. 
 
-The `spanatt_exporter` unbundles key-value pairs that were packaged at the data source into OTLP span attributes. The basic unbundling protocol: 
+The `internal/spanattex/bigquery` exporter module unbundles key-value pairs that were packaged at the data source into OTLP span attributes, and repackages them for export to BigQuery target table. The basic unbundling protocol: 
 1. grab the key-value pairs from the span's `attributes` field
 2. verify that the keys align with the export target database schema
 3. repackage the associated values for export
@@ -116,19 +116,28 @@ You can also build your own components...
 
 ### Custom components
 
-This step is a little more involved than building a custom Collector distribution as there's no official tooling to support this process.
+Custom components are built from scratch. Components need to be Go modules, and they need to meet certain requirements to work within the Collector framework.
 
-The essentials for any custom component:
-- make it its own Go module
-- files:
-  - config.go: if the component will have config options, this file includes configuration file data structure(s)
-  - factory.go: for building new instances of the component
-  - <component-type>.go: component-specific logic
-  - testdata/config.yaml: test to parse the configuration into the struct in config.go above
-  - metrics.go: if the component uses metrics, this is where they're defined
-  - *_test.go: unit tests
+The starting point for deciphering the mystery of what, precisely, is required in assembling the custom component is to recognize that any component referenced by in the distribution manifest must have a `NewFactory()` function that returns a `Factory` interface. Here's an example for [exporters](https://pkg.go.dev/go.opentelemetry.io/collector/exporter):
 
-These files aren't optional so, even if they're not apparently necessary for the component, they need to be included and populated with the minimal boilerplate for each. There isn't a reference that pulls this together, so find a standard `core` or `contrib` component of the same type, and grab the boilerplate from there.
+```go
+func NewFactory(cfgType component.Type, createDefaultConfig component.CreateDefaultConfigFunc, options ...FactoryOption) Factory {
+	f := &factory{
+		cfgType:                 cfgType,
+		CreateDefaultConfigFunc: createDefaultConfig,
+	}
+	for _, opt := range options {
+		opt.applyOption(f)
+	}
+	return f
+}
+```
+
+Both `cfgType` and `createDefaultConfig` are required, and we define those in `factory.go`. 
+
+Choosing the `exporter.WithTraces()` option allows the inclusion of customized export functionality. We'll define that to unbundle span attributes, repackage as row data formatted for BigQuery ingest, and make an API call to send the data to BigQuery.
+
+A useful approach is to reference custom components in the `contrib` collection as examples - [`opentelemetry-collector-contrib` collection](https://github.com/open-telemetry/opentelemetry-collector-contrib).
 
 #### Adding custom components to a Collector
 
@@ -140,13 +149,20 @@ If the custom component is local, you can reference it by its full path. So long
 
 #### Example: Custom exporter
 
-See `/cmd/spanatt_exporter`.
+The unbundling of span attributes to create value-rows which can be exported to a target table requires customization for the specific target; each such target-specific exporter should have its own module. 
+
+The module for the exporter customized to export to a BigQuery table is `github.com/msyvr/internal/spattex/bigquery`. Include it in the `builder_config.yaml` as:
+```yaml
+exporters:
+  - gomod: "github.com/msyvr/otelex/internal/spattex/bigquery v0.1.0"
+    path: "msyvr/o11y/otelex/internal/spattex/bigquery"
+```
 
 ### Collector manifest
 
-At this point, we have a Collector _distribution_, whether prebuilt or customized. We don't quite have a Collector _instance_.
+At this point, we have a Collector _distribution_, whether prebuilt or customized. Now, we'll deploy a Collector _instance_.
 
-The distribution that'll be used to deploy instances will determine which components (and some other options) are available for building pipelines. Those components still need to be assembled into pipelines, and the next step is to set up a [Collector configuration file](https://opentelemetry.io/docs/collector/configuration/) with those details.
+The distribution used at deploy determines which components (and some other options) are available for building pipelines. Now, all that's needed is the [Collector configuration file](https://opentelemetry.io/docs/collector/configuration/), which is the manifest for building those pipelines and is referenced by the `--config` flag when the distribution binary is run.
 
 [Example Collector manifest]
 
@@ -154,10 +170,21 @@ The distribution that'll be used to deploy instances will determine which compon
 
 ### Deploy Collector instances
 
-The manifest is provided to the `--config` flag when the run command for the Collector instance is executed.
+The manifest is provided to the `--config` flag when the run command for the Collector instance is executed, whether locally or containerized (Docker/Kubernetes).
+
+Local deploy is generally limited to dev testing. Docker deploys are easy enough, so defaulting to using those locally is a fine option, too.
 
 #### Local deploy
-Local deploy is generally just useful for quick tests. Docker deploys are easy enough, so I default to using those locally, too.
+
+Locally, run the binary with the `config` flag:
+
+```bash
+otelcol-custom --config /path/to/config-filename.yaml
+```
+
+>Validate the config file: Running the above with`validate` preceding `--config` will check that the provided config file aligns with a valid OpenTelemetry Collector configuration.
+
+>Chained config flags are merged: Multiple `--config` flags will be merged into a single configuration; if the merger doesn't yield a complete configuration, the command will error.
 
 Alternatives for loading the configuration include environment variables:
 
@@ -172,8 +199,6 @@ otelcol-custom --config=https://my-domain.com/config-filename.yaml
 ```bash
 otelcol-custom --config="yaml:exporters::custom-exporter"
 ```
-
-nb: Multiple `--config` flags will be merged into a single configuration; if the merger doesn't yield a complete configuration, the command will error.
 
 #### Docker deploy
 
