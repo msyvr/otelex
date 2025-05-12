@@ -45,8 +45,8 @@ func (row bqrow) addKeyValue(k string, v pcommon.Value) {
 	// Names with periods are inconvenient in SQL, replace with underscore
 	k = strings.Replace(k, ".", "_", -1)
 	// BigQuery types vs OTel span attribute types.
-	// https://pkg.go.dev/cloud.google.com/go/bigquery@v1.50.0#Table.Metadata
-	// https://github.com/googleapis/google-cloud-go/blob/bigquery/v1.57.1/bigquery/value.go#L33
+	// https://pkg.go.dev/cloud.google.com/go/bigquery#Table.Metadata
+	// https://github.com/googleapis/google-cloud-go/blob/ed488b94b46b50585f91e065dd877c06d85ce879/bigquery/value.go#L32
 	// https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 	switch v.Type() {
 	case pcommon.ValueTypeBool:

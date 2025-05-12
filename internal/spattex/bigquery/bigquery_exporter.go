@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -25,7 +26,7 @@ https://cloud.google.com/bigquery/docs/samples/bigquery-table-insert-rows
 
 Estimate optimal batch size -
 
-Streaming data rows (OTel spans) are batched with consideration for:
+Rows are batched with consideration for:
 1. API call rate limit, and 2. data ingest/insert rate limit.
 Specs (BQ quota values - verify vs. current values at link above):
 -> BQ ingest rate limit: 1 GB/s (per region in the US and EU, for all BQ tables)
@@ -37,22 +38,23 @@ Batch size determination:
 -> Example data row is assumed to be ~1 kB.
 -> Without batching or throttling, the API call rate could reach 10^6 /s.
 -> With batching of 8196 spans/batch (<10 MB) -> API call rate <200 /s.
+
+! It's useful to batch early in the pipeline. Also, if there's a need to tune batching,
+it's less of a lift to do so in the config used at deploy (no need to rebuild the
+Collector distribution binary). So, batching will be set in /builders/otelcol-config.yaml.
 */
 
 // Partitioning the table into single days is useful for efficient queries.
 const tablePartitionFieldKey = "ts"
 
-// The exporterhelper package enables queued retry capabilities.
-// https://github.com/open-telemetry/opentelemetry-collector/blob/v0.125.0/exporter/exporterhelper/README.md
-
-func TunedQueueSettings() exporterhelper.QueueSettings {
-	return exporterhelper.QueueSettings{
+func TunedQueueSettings() exporterhelper.QueueBatchConfig {
+	return exporterhelper.QueueBatchConfig{
 		Enabled: true,
 	}
 }
 
-func TunedRetrySettings() exporterhelper.RetrySettings {
-	return exporterhelper.RetrySettings{
+func TunedRetrySettings() configretry.BackOffConfig {
+	return configretry.BackOffConfig{
 		Enabled:         true,
 		InitialInterval: 60 * time.Second,
 		MaxInterval:     60 * time.Second,
@@ -60,9 +62,9 @@ func TunedRetrySettings() exporterhelper.RetrySettings {
 	}
 }
 
-func TunedTimeoutSettings() exporterhelper.TimeoutSettings {
-	// Handle delays caused by (occasional) schema updates.
-	return exporterhelper.TimeoutSettings{
+func TunedTimeoutSettings() exporterhelper.TimeoutConfig {
+	// Long-ish, to accommodate (occasional) target table schema updates.
+	return exporterhelper.TimeoutConfig{
 		Timeout: 120 * time.Second,
 	}
 }
@@ -93,51 +95,51 @@ func newRowsExporter(cfg *Config, settings exporter.Settings) (exporter.Traces, 
 		return nil, fmt.Errorf("failed to create traces exporter: %w", err)
 	}
 
-	return exporterhelper.NewTracesExporter(
+	return exporterhelper.NewTraces(
 		context.Background(),
 		settings,
 		cfg,
-		sender.sendRows,
+		sender.consumeTraces,
 		exporterhelper.WithQueue(TunedQueueSettings()),
 		exporterhelper.WithRetry(TunedRetrySettings()),
 		exporterhelper.WithTimeout(TunedTimeoutSettings()),
 	)
 }
 
-func (s *bigquerySender) sendRows(ctx context.Context, td ptrace.Traces) error {
+func (s *bigquerySender) consumeTraces(ctx context.Context, td ptrace.Traces) error {
 	rows := buildTraceRows(td)
-	err := s.insertRows(ctx, rows)
+	err := s.sendRows(ctx, rows)
 	if err != nil {
 		fmt.Printf("Error pushing traces: %v\n", err)
 	}
 	return err
 }
 
-func (sender *bigquerySender) insertRows(ctx context.Context, rows []bqrow) error {
+func (sender *bigquerySender) sendRows(ctx context.Context, rows []bqrow) error {
 	table := sender.bigqueryClient.Dataset(sender.Dataset).Table(sender.Table)
 	err := table.Inserter().Put(ctx, rows)
 	if err != nil && strings.Contains(err.Error(), "no such field") {
-		err := sender.updateSchema(ctx, table, rows)
-		if err != nil {
-			return err
+		if sender.SchemaFlexible {
+			err := sender.updateSchema(ctx, table, rows)
+			if err != nil {
+				return err
+			}
+
+			// Avoid failed inserts with an enforced delay after schema updates.
+			// Typically, it's best practice to have a fixed schema, so this won't
+			// come up in those cases. This delay accommodates the (nominally exceptional)
+			// case where schema alterations occur on-the-fly.
+			const wait = 1 * time.Minute
+			fmt.Printf("Waiting %v to allow schema updates to register fully", wait)
+			time.Sleep(wait)
+
+			// table.Inserter().Put() does not skipInvalidRows. If any row fails,
+			// the entire batch will fail. In that case, retry the full batch.
+			fmt.Println("Retrying insert")
+			return table.Inserter().Put(ctx, rows)
 		}
-
-		// Avoid failed inserts with an enforced delay after schema updates.
-		// Typically, it's best practice to have a fixed schema, so this won't
-		// come up in those cases. This delay accommodates the (ideally, exceptional)
-		// case where schema alterations occur on-the-fly.
-		const wait = 1 * time.Minute
-		fmt.Printf("Waiting %v to allow schema updates to register fully", wait)
-		time.Sleep(wait)
-
-		// table.Inserter().Put() does not set skipInvalidRows to true. If any
-		// row fails, the entire batch will fail. In that case, retry the full batch.
-		// TODO This deserves analysis to evaluate whether a single retry is
-		// sufficient.
-		fmt.Println("Retrying insert")
-		return table.Inserter().Put(ctx, rows)
+		return err
 	}
-	return err
 }
 
 // Attempt to update the target table schema when new fields are identified.
@@ -190,8 +192,8 @@ func (s *bigquerySender) updateSchema(ctx context.Context, table *bigquery.Table
 			}
 
 			if !knownFields[key] {
-				// OTel span attributes must be of these specific types (cases).
-				// Conveniently, these each map to a BigQuery type.
+				// OTel span attribute value types are limited to these cases.
+				// Conveniently, they each map to a BigQuery type.
 				var fieldType bigquery.FieldType
 				if key == "ts" {
 					fieldType = bigquery.TimestampFieldType
