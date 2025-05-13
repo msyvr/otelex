@@ -1,0 +1,41 @@
+extensions:
+  # See https://github.com/open-telemetry/opentelemetry-collector/tree/main/extension/memorylimiterextension
+  memory_limiter:
+    # Maximum process heap memory allocation target (nb: MiB).
+    # The process total memory usage will be about 50MiB higher.
+    limit_mib: 4000
+    # The maximum, in MiB, spike expected between the measurements of memory usage.
+    # The effective soft memory limit will be: limit_mib - spike_limit_mib
+    spike_limit_mib: 500
+    # Default (0): no checks performed. Watch CPU consumption if <1s (not recommended)
+    check_interval: 5s
+  pprof:
+  # Exposed zpages routes: 
+  # https://github.com/open-telemetry/opentelemetry-collector/blob/main/extension/zpagesextension/README.md#exposed-zpages-routes
+  zpages:   
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  batch/bigquery:
+    # See internal/spattex/bigquery_exporter for estimate of optimal batch size.
+    send_batch_size: 8192
+    send_batch_max_size: 8192
+    timeout: 500ms
+
+exporters:
+  bigquery:
+
+service:
+  extensions: [memory_limiter, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch/bigquery]
+      exporters: [bigquery]

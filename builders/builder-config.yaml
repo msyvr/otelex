@@ -1,5 +1,19 @@
 dist:
-  name: otelcol-otelex
-  description: OTelEx Collector binary
-  output_path: /bin/otxdist
+  name: otelex-bq
+  description: OTelCol distribution with custom BigQuery exporter for span attributes
+  output_path: ./otelex-bq
   otelcol_version: 0.125.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.125.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.125.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.125.0
+  - path: ../otelex/internal/spattex/bigquery
+    gomod: github.com/msyvr/otelex/internal/spattex/bigquery v0.1.1
+
+extensions:
+  - gomod: go.opentelemetry.io/collector/extension/memorylimiterextension v0.125.0
