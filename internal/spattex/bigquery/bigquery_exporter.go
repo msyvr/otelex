@@ -107,7 +107,7 @@ func newRowsExporter(cfg *Config, settings exporter.Settings) (exporter.Traces, 
 }
 
 func (s *bigquerySender) consumeTraces(ctx context.Context, td ptrace.Traces) error {
-	rows := buildTraceRows(td)
+	rows := buildRows(td)
 	err := s.sendRows(ctx, rows)
 	if err != nil {
 		fmt.Printf("Error pushing traces: %v\n", err)
@@ -115,10 +115,14 @@ func (s *bigquerySender) consumeTraces(ctx context.Context, td ptrace.Traces) er
 	return err
 }
 
-func (sender *bigquerySender) sendRows(ctx context.Context, rows []bqrow) error {
+func (sender *bigquerySender) sendRows(ctx context.Context, rows []bigqueryrow) error {
 	table := sender.bigqueryClient.Dataset(sender.Dataset).Table(sender.Table)
 	err := table.Inserter().Put(ctx, rows)
 	if err != nil && strings.Contains(err.Error(), "no such field") {
+		// When a span attribute key is not represented in the schema, it will
+		// be updated if the exporter is configured to have a flexible schema.
+		// New fields cannot be REQUIRED fields. Existing table rows will have
+		// a NULL value in new field(s).
 		if sender.SchemaFlexible {
 			err := sender.updateSchema(ctx, table, rows)
 			if err != nil {
@@ -127,9 +131,9 @@ func (sender *bigquerySender) sendRows(ctx context.Context, rows []bqrow) error 
 
 			// Avoid failed inserts with an enforced delay after schema updates.
 			// Typically, it's best practice to have a fixed schema, so this won't
-			// come up in those cases. This delay accommodates the (nominally exceptional)
-			// case where schema alterations occur on-the-fly.
-			const wait = 1 * time.Minute
+			// come up in those cases. This delay accommodates the (nominally
+			// exceptional) case where schema alterations occur on-the-fly.
+			const wait = 60 * time.Second
 			fmt.Printf("Waiting %v to allow schema updates to register fully", wait)
 			time.Sleep(wait)
 
@@ -159,20 +163,20 @@ func (s *bigquerySender) updateSchema(ctx context.Context, table *bigquery.Table
 	for _, field := range meta.Schema {
 		knownFields[field.Name] = true
 		switch field.Type {
-		case bigquery.BooleanFieldType:
-			knownFieldsTypes[field.Name] = "bool"
 		case bigquery.BigNumericFieldType:
 			knownFieldsTypes[field.Name] = "float64"
+		case bigquery.BooleanFieldType:
+			knownFieldsTypes[field.Name] = "bool"
+		case bigquery.BytesFieldType:
+			knownFieldsTypes[field.Name] = "byte"
 		case bigquery.NumericFieldType:
 			knownFieldsTypes[field.Name] = "int64"
 		case bigquery.StringFieldType:
 			knownFieldsTypes[field.Name] = "string"
-		case bigquery.BytesFieldType:
-			knownFieldsTypes[field.Name] = "byte"
 		case bigquery.TimestampFieldType:
 			knownFieldsTypes[field.Name] = "int64"
 		default:
-			return fmt.Errorf("bigquery field %v has type not permitted as OTel span attribute: %v", field.Name, field.Type)
+			return fmt.Errorf("BigQuery field type %v incompatible with span attribute value types", field.Type)
 		}
 	}
 	newFields := make(map[string]bool)
@@ -185,9 +189,10 @@ func (s *bigquerySender) updateSchema(ctx context.Context, table *bigquery.Table
 			valueType := reflect.TypeOf(value).String()
 
 			if knownFields[key] {
-				// TODO Improve handling of fields with duplicate names and different types.
+				// TODO Improve handling of fields with duplicate names but
+				// different value types.
 				if knownFieldsTypes[key] != valueType {
-					fmt.Printf("Existing field %v is not of type: %v. Export may fail.\n", key, reflect.TypeOf(value))
+					fmt.Printf("Schema field %v doesn't map to span value type %v. Export may fail.\n", key, reflect.TypeOf(value))
 				}
 			}
 
@@ -201,14 +206,15 @@ func (s *bigquerySender) updateSchema(ctx context.Context, table *bigquery.Table
 					switch value.(type) {
 					case bool:
 						fieldType = bigquery.BooleanFieldType
+					case byte:
+						fieldType = bigquery.BytesFieldType
 					case float64:
 						fieldType = bigquery.BigNumericFieldType
 					case int64:
 						fieldType = bigquery.NumericFieldType
 					case string:
 						fieldType = bigquery.StringFieldType
-					case byte:
-						fieldType = bigquery.BytesFieldType
+
 					default:
 						fmt.Printf("Schema update attempted: %v has unsupported type: %v.\n", key, reflect.TypeOf(value))
 					}

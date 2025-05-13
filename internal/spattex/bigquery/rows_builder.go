@@ -7,10 +7,15 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-type bqrow map[string]interface{}
+// Enable row insertion into a BigQuery table by formatting each row
+// as a map, with keys matching the table schema fields. A batch of
+// rows may be inserted in one API call by creating an array of row-maps.
+type bigqueryrow map[string]interface{}
 
-func buildTraceRows(td ptrace.Traces) []bqrow {
-	var rows []bqrow
+// The OpenTelemetry ptrace.Traces type has a defined nested structure.
+// Navigate to the nest level of span attributes to extract those for the map.
+func buildRows(td ptrace.Traces) []bigqueryrow {
+	var rows []bigqueryrow
 	rspans := td.ResourceSpans()
 	for i := 0; i < rspans.Len(); i++ {
 		rspan := rspans.At(i)
@@ -20,15 +25,15 @@ func buildTraceRows(td ptrace.Traces) []bqrow {
 			spans := sspan.Spans()
 			for k := 0; k < spans.Len(); k++ {
 				span := spans.At(k)
-				row := bqrow{
+				row := bigqueryrow{
 					"name": span.Name(),
-					"type": "trace",
 				}
+				// Span attributes exist at both the 'resource' (i.e., parent trace) level
+				// and at the individual span level.
 				rspan.Resource().Attributes().Range(func(k string, v pcommon.Value) bool {
 					row.addKeyValue(k, v)
 					return true
 				})
-				// Add span-level attributes
 				span.Attributes().Range(func(k string, v pcommon.Value) bool {
 					row.addKeyValue(k, v)
 					return true
@@ -41,8 +46,10 @@ func buildTraceRows(td ptrace.Traces) []bqrow {
 	return rows
 }
 
-func (row bqrow) addKeyValue(k string, v pcommon.Value) {
-	// Names with periods are inconvenient in SQL, replace with underscore
+// Parse key value pairs to align with field name preferences
+// and BigQuery type equivalents for span attribute value types.
+func (row bigqueryrow) addKeyValue(k string, v pcommon.Value) {
+	// Names with periods are inconvenient for SQL.
 	k = strings.Replace(k, ".", "_", -1)
 	// BigQuery types vs OTel span attribute types.
 	// https://pkg.go.dev/cloud.google.com/go/bigquery#Table.Metadata
@@ -51,17 +58,17 @@ func (row bqrow) addKeyValue(k string, v pcommon.Value) {
 	switch v.Type() {
 	case pcommon.ValueTypeBool:
 		row[k] = v.Bool()
+	case pcommon.ValueTypeBytes:
+		row[k] = v.Bytes()
 	case pcommon.ValueTypeDouble:
 		row[k] = v.Double()
 	case pcommon.ValueTypeInt:
 		row[k] = v.Int()
-	case pcommon.ValueTypeStr:
-		row[k] = v.Str()
 	case pcommon.ValueTypeMap:
 		row[k] = v.Map()
 	case pcommon.ValueTypeSlice:
 		row[k] = v.Slice()
-	case pcommon.ValueTypeBytes:
-		row[k] = v.Bytes()
+	case pcommon.ValueTypeStr:
+		row[k] = v.Str()
 	}
 }
