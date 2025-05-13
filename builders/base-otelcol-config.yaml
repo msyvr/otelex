@@ -1,0 +1,26 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  batch:
+    # See internal/spattex/bigquery_exporter for estimate of optimal batch size.
+    send_batch_size: 8192
+    send_batch_max_size: 8192
+    timeout: 500ms
+
+exporters:
+  otlp:
+    endpoint: 127.0.0.1:16686
+  bigquery:
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp, bigquery]
