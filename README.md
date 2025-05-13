@@ -12,7 +12,7 @@ The Collector is designed to process [OTLP](https://opentelemetry.io/docs/specs/
 
 ### Custom exporter capabilities
 
-The `internal/spattex/bigquery` exporter verifies that each span's mapped elements align with the target database schema. The verified map structures are then formatted as rows for export to BigQuery and exported for insertion into the receiving table.
+To test this on export to a real database, BigQuery is used here. The `internal/spattex/bigquery` exporter verifies that the each span's attributes (key-value pairs) align with the target database schema. The key-value pairs are extracted to a map. Those maps are equivalent to rows for export to BigQuery and batches of rows are exported for insertion into the receiving table.
 
 ### Project outline
 
@@ -126,11 +126,15 @@ You can also build your own components and include those in a custom Collector d
 
 ## Building custom OpenTelemetry Collector components
 
-Custom components are built from scratch: there's no official builder utility as of 2025.05.12. 
+Custom components are built from scratch: there's no official builder utility as of 2025.05.12.
 
-Components need to be Go modules, and they need to meet certain requirements to work with the Collector distribution build framework. A starting point for deciphering the mystery of what, precisely, is required in assembling the custom component: any component referenced in the distribution manifest must have a `NewFactory()` function that returns a `Factory` interface. 
+The APIs for receiver, processor, and exporter components:
+- [opentelemetry-collector/receiver/receiver.go](https://github.com/open-telemetry/opentelemetry-collector/blob/main/receiver/receiver.go)
+- [opentelemetry-collector/processor/processor.go](https://github.com/open-telemetry/opentelemetry-collector/blob/main/processor/processor.go)
+- [opentelemetry-collector/exporter/exporter.go](https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/exporter.go)
+ 
 
-Here's an example for [exporters](https://pkg.go.dev/go.opentelemetry.io/collector/exporter):
+Any component referenced in the distribution manifest will need a `NewFactory()` function that returns a `Factory` interface. Here's an example for [exporters](https://pkg.go.dev/go.opentelemetry.io/collector/exporter):
 
 ```go
 func NewFactory(cfgType component.Type, createDefaultConfig component.CreateDefaultConfigFunc, options ...FactoryOption) Factory {
@@ -145,9 +149,11 @@ func NewFactory(cfgType component.Type, createDefaultConfig component.CreateDefa
 }
 ```
 
-Both `cfgType` and `createDefaultConfig` are required, and we define those in `factory.go`. 
+Both `cfgType` and `createDefaultConfig` are required to generate a component Factory. Those are defined in `factory.go`.
 
-One of the permitted options is [`exporter.WithTraces()`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#WithTraces), which takes as an argument a [`CreateTracesFunc`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#CreateTracesFunc) which allows the definition of custom actions for 'pushing' traces. In this case, those custom actions (which act on batches of spans) are to extract span attributes into a map structure, format those to match the target table (build rows that satisfy the table schema), and export them via an API request.
+To export non-OTLP formatted data, start with the [`exporter.WithTraces()`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#WithTraces) option. It takes as an argument a [`CreateTracesFunc`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#CreateTracesFunc) where custom actions for 'pushing' traces can be defined with the expectation of returning an `error` type. The OTLP traces are consumed by this function, with no expectations attached to retaining their OTLP format through to export from the Collector.
+
+In this case, those custom actions are applied to batches of spans to extract, on a span-by-span basis, attributes into a map structure that represents a target table row. Each map is formatted to match the target table (i.e., build rows that satisfy the table schema), appended to an array of map-rows, and the batch exported via an API request.
 
 A useful reference for building custom Collector components is the `contrib` collection of custom components - [`opentelemetry-collector-contrib` collection](https://github.com/open-telemetry/opentelemetry-collector-contrib).
 
