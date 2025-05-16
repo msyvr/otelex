@@ -1,7 +1,7 @@
 dist:
-  name: otelex-bq
+  name: bq
   description: OTelCol distribution with custom BigQuery exporter for span attributes
-  output_path: ./otelex-bq
+  output_path: ./bq
   otelcol_version: 0.125.0
 
 receivers:
@@ -12,7 +12,7 @@ processors:
 
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.125.0
-  - path: ../otelex/internal/spattex/bigquery
+  - path: /Users/msyvr/o11y/otelex/internal/spattex/bigquery
     gomod: github.com/msyvr/otelex/internal/spattex/bigquery v0.1.1
 
 extensions:
