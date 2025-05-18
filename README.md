@@ -1,3 +1,5 @@
+For more details on this project, see the accompanying [blog post](https://monicaspisar.com/posts/otelcol-for-all).
+
 ## otelex: An OpenTelemetry Collector distribution with custom components
 
 This is an exercise to build a custom OpenTelemetry Collector distribution that includes a custom exporter which unbundles span attributes (key-value pairs) into an independent map structure. 
@@ -33,46 +35,30 @@ To test this on export to a real database, BigQuery is used here. The `internal/
 
 _This project is inspired by a data pipeline that handled both observability and client usage data. The approach allowed for fewer components, making for a simpler system. Here, I'm aiming to interrogate the limits of this implementation._
 
----
+## OpenTelemetry Collector
 
-## OpenTelemetry Collector: an overview
+An [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a software component for consolidating the handling of one or more OTLP data streams en route to database or visualization targets.
 
-An [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a software component designed to handle ingest for OTLP encoded data, its processing, and ultimate export to designated targets.
+### Pre-built distributions
 
-A Collector may be deployed as either an agent alongside a specific application/service, or as a standalone gateway that consolidates processing and export functions for input streams. A gateway deploy is useful in situations where a collection of data sources (say, a distributed fleet of servers) emit data streams which require an update in processing or export target. With the gateway, those changes can be made in just one place - the gateway - with no need to update the individual data sources that make up the collection. 
-
-In either configuration, a Collector manages input streams, applies processing to designated streams, and fans streams out to one or more export targets. One way to think about it is that pipelines are set up within the Collector, and a given stream may be directed to follow one or more pipelines. 
-
-When designed to act as a gateway for an application/service with high data flow rates, multiple identical Collectors can be set up downstream of a load balancer to improve reliability, resilience, and efficiency.
-
-The Collector also emits its own observability data, for monitoring its performance/health.
-
-### Collector distribution options
-
-#### Pre-built
-
-A [pre-built Collector distribution can be downloaded](https://github.com/open-telemetry/opentelemetry-collector-releases/releases) directly from OpenTelemetry's Collector repo on Github. 
-
-The choice of distribution establishes which components, services, and extensions are available for pipelines. 
-
-Separately, the actual pipeline configuration(s) are defined using a `yaml` manifest.
-
-Three basic flavors of [pre-built distributions are maintained by OpenTelemetry](https://github.com/open-telemetry/opentelemetry-collector-releases/releases):
+A [pre-built Collector distribution can be downloaded](https://github.com/open-telemetry/opentelemetry-collector-releases/releases) directly from OpenTelemetry's Collector repo on Github. The choice of pre-built distribution establishes which components, services, and extensions are available for pipelines, though it doesn't establish the pipelines themselves. Three basic flavors of [pre-built distributions are maintained by OpenTelemetry](https://github.com/open-telemetry/opentelemetry-collector-releases/releases):
 1. core
 2. contrib
 3. kubernetes
 
-The `core` distribution includes a limited, general set of components. The `contrib` distribution includes all components in the [contrib collection](https://github.com/open-telemetry/opentelemetry-collector-contrib). And the `kubernetes` distribution is optimized for deploy in the context of a kubernetes cluster.
+Separately, the pipeline configuration(s) are defined in a manifest that's used with the `--config` flag when running the distribution binary to deploy a Collector instance. We'll go over that in the section on [Collector config](#collector-config).
 
-Using a pre-built distribution is convenient for local tests. For production systems, customizing the distribution to include only those components required is good practice.
+Using a pre-built distribution is convenient. For production systems, though, best practice is to customize the distribution to include only the required components. Let's look at how to do that.
 
-#### Custom builds
+### Custom distributions
 
-A custom Collector distribution might be useful to limit the build to a specific set of components (from `core` or `contrib` collections) or to incorporate custom components. 
+There are two cases where custom Collector builds are the way to go -
 
-OpenTelemetry maintains a tool for generating custom builds: the [Collector Builder](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder). 
+First, building a custom distribution is best practice when using just a subset of components from a pre-built distribution: extraneous components increase the attack surface, posing an unnecessary security risk, and they also needlessly increase the size of the distribution binary.
 
-The builder tool is included in [OpenTelemetry Collector releases with `cmd/builder` tags](https://github.com/open-telemetry/opentelemetry-collector-releases/tags). For custom builds, you may choose to [download just the builder component](https://opentelemetry.io/docs/collector/custom-collector/#step-1---install-the-builder) separately from the Collector itself. Here's how you can do that for the version you'd need for macOS (ARM64) and OTel v0.125.0 (current as of 2025.05.07):
+Second, when components in the `core` and `contrib` collections don't provide the required functionality, a custom Collector build is the only option.
+
+OpenTelemetry maintains a tool for generating custom builds: the [Collector Builder](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder). The builder tool is included in [OpenTelemetry Collector releases with `cmd/builder` tags](https://github.com/open-telemetry/opentelemetry-collector-releases/tags). For custom builds, you may choose to [download just the builder component](https://opentelemetry.io/docs/collector/custom-collector/#step-1---install-the-builder) separately from the Collector itself. Here's how you can do that for the version you'd need for macOS (ARM64) and OTel v0.125.0 (current as of 2025.05.07):
 ```bash
 curl --proto '=https' --tlsv1.2 -fL -o ocb \
 https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/cmd%2Fbuilder%2Fv0.125.0/ocb_0.125.0_darwin_arm64
@@ -85,46 +71,25 @@ Once downloaded, an `ocb` directory will be added to the current directory, and 
 ./ocb help
 ```
 
-At this point, the Collector _builder_ is ready for customization. There are two options here. Both require that a builder manifest specifies the limited suite of components to be made available with the to-be-created Collector distribution.
+At this point, the Collector _builder_ is ready for customization. There are two possibilities at this stage -
 
-Option 1: The goal of the customization is to limit which standard components will be available.
+Option 1: Limit which standard components will be available. No custom components.
 
-- All that's needed at this point is a configuration file that details which components to include. See the **Build config for the Collector _distribution_ binary** section.
+- All that's needed at this point is a configuration file that details which components to include. Details in the section on [Build config](#build-config).
 
-Option 2: The customization will include custom components not included in either the `core` or `contrib` distributions.
+Option 2: Include custom components.
 
-- The custom components need to be constructed before inclusion in the distribution build config/manifest. See the **Building custom OpenTelemetry Collector components** section.
+- The custom components need to be constructed before inclusion in the distribution build config/manifest. Details in the section on [Building custom components](#building-custom-components).
 
-#### Custom build configuration
-
-The Collector builder binary needs a manifest to know which components to include.
-
-
-
-With the builder manifest file as `builder-config.yaml` and the builder binary at `./ocb`, the custom Collector distribution is built as:
+Both options require a builder manifest that identifies which components to include in the resulting Collector distribution. With the builder manifest file as `builder-config.yaml` and the builder binary at `./ocb`, the custom Collector distribution is built as:
 
 ```bash
 ./ocb --config builder-config.yaml
 ```
 
-Unless the target output was renamed, an `otelcol-dev` folder has been created at the same folder level as the ocb folder.
+The builder manifest will specify a name and path for the target folder which will contain the binary for the new distribution and the files from which the binary was built.
 
----
-
-## OpenTelemetry Collector components: an overview
-
-Basic OpenTelemetry Collector components are of three types:
-1. receivers
-2. processors
-3. exporters
-
-The OTel Collector [distribution](https://opentelemetry.io/docs/concepts/distributions/) selected determines which components can be included in the pipelines of deployed Collector instances.
-
-You can also build your own components and include those in a custom Collector distribution. 
-
----
-
-## Building custom OpenTelemetry Collector components
+## Building custom components
 
 Custom components are built from scratch: there's no official builder utility as of 2025.05.12.
 
@@ -134,7 +99,7 @@ The APIs for receiver, processor, and exporter components:
 - [opentelemetry-collector/exporter/exporter.go](https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/exporter.go)
  
 
-Any component referenced in the distribution manifest will need a `NewFactory()` function that returns a `Factory` interface. Here's an example for [exporters](https://pkg.go.dev/go.opentelemetry.io/collector/exporter):
+Any component referenced in the distribution manifest will need a `NewFactory()` function that returns a `Factory` interface that'll enable production of that specific component for use in the Collector. Here's an example for [exporters](https://pkg.go.dev/go.opentelemetry.io/collector/exporter):
 
 ```go
 func NewFactory(cfgType component.Type, createDefaultConfig component.CreateDefaultConfigFunc, options ...FactoryOption) Factory {
@@ -149,145 +114,49 @@ func NewFactory(cfgType component.Type, createDefaultConfig component.CreateDefa
 }
 ```
 
-Both `cfgType` and `createDefaultConfig` are required to generate a component Factory. Those are defined in `factory.go`.
+Both `cfgType` and `createDefaultConfig` are required to generate a component Factory. For otelex, those are defined in `factory.go`.
 
-To export non-OTLP formatted data, start with the [`exporter.WithTraces()`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#WithTraces) option. It takes as an argument a [`CreateTracesFunc`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#CreateTracesFunc) where custom actions for 'pushing' traces can be defined with the expectation of returning an `error` type. The OTLP traces are consumed by this function, with no expectations attached to retaining their OTLP format through to export from the Collector.
+To export non-OTLP formatted data, otelex uses the [`exporter.WithTraces()`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#WithTraces) option. It takes as an argument a [`CreateTracesFunc`](https://pkg.go.dev/go.opentelemetry.io/collector/exporter#CreateTracesFunc) where custom actions for 'pushing' traces can be defined with the expectation of returning an `error` type. The OTLP traces are consumed, with no expectations attached to retaining their OTLP format.
 
-In this case, those custom actions are applied to batches of spans to extract, on a span-by-span basis, attributes into a map structure that represents a target table row. Each map is formatted to match the target table (i.e., build rows that satisfy the table schema), appended to an array of map-rows, and the batch exported via an API request.
+For the BigQuery exporter included in otelex, custom actions are applied to batches of spans to extract, on a span-by-span basis, attributes into a map structure. The map structure represents a target table row (values) for the target table schema (keys). During extraction, both key and value types are checked and converted. Each map can then be appended to an array of map-rows, and the batch exported via an API request.
 
-A useful reference for building custom Collector components is the `contrib` collection of custom components - [`opentelemetry-collector-contrib` collection](https://github.com/open-telemetry/opentelemetry-collector-contrib).
+A useful reference for building custom Collector components is the collection of custom components in the [`opentelemetry-collector-contrib` collection](https://github.com/open-telemetry/opentelemetry-collector-contrib).
 
----
 
 ## Adding custom components to a Collector
 
-The Collector builder manifest is where components to include in the distribution are itemized.
+The [Collector builder manifest](https://monicaspisar.com/posts/otelcol-for-all/#build-config) itemizes which components to include in the distribution. If the custom component is published as a module visible to Go tools, you can reference it similarly to existing/standard components from `core` or `contrib`.
 
-If the custom component is published as a module visible to Go tools, you can reference it similarly to existing/standard components from `core` or `contrib`.
+If the custom component is local, you can reference it by its full path. So long as the distribution library build is run locally, or the component files are exported to the filesystem of the deploy environment, the component will be accessible and will be incorporated into the distribution.
 
-If the custom component is local, you can reference it by its full path. So long as the distribution library build is run locally, the component will be accessible and will be incorporated into the distribution.
+## Configuration files
 
-### Example: Custom exporter
+### Build config
 
-The goal is to unbundle span attributes to generate value-rows formatted for export to a target table via API request. The formatting to satisfy the target table schema requires customization, as does implementation of API requests. Here, the custom exporter target is a BigQuery table.  
+This is for the Collector _distribution_ binary.
 
-Include it in the `builder_config.yaml` as:
+The `ocb` utility for building custom Collector distributions requires a manifest that tells it which components to include. (It doesn't specify the pipelines, just the components that will be available for building the pipelines.) 
+
+An [example build manifest from OpenTelemetry](https://opentelemetry.io/docs/collector/custom-collector/) shows how to include components from `core` or `contrib`.
+
+In [otelex](https://github.com/msyvr/otelex), the [custom exporter component](https://github.com/msyvr/otelex/tree/main/internal/spattex/bigquery) is included in the `builder_config.yaml` with a local path as it's not a published Go module (more on that in [Docker deploy](#docker-deploy)):
 ```yaml
 exporters:
   - gomod: "github.com/msyvr/otelex/internal/spattex/bigquery v0.1.0"
     path: "msyvr/o11y/otelex/internal/spattex/bigquery"
 ```
 
----
+### Collector config
 
-## Build config for the Collector _distribution_ binary
+This is for the deployed Collector _instance_.
 
-The `ocb` utility for building custom Collector distributions requires a manifest that tells it which components to include. (It doesn't specify the pipelines, just the components that will be available for building the pipelines.) 
+At this point, the Collector _distribution_ is prepared, whether prebuilt or customized. The distribution determines which components (and some other options) are available for building pipelines. Those will be composed into pipelines in the Collector [configuration](https://opentelemetry.io/docs/collector/configuration/#basics) file.
 
-Here's an [example build manifest from OpenTelemetry](https://opentelemetry.io/docs/collector/custom-collector/):  
-
-```yaml
-dist:
-  name: otelcol-dev
-  description: Basic OTel Collector distribution for Developers
-  output_path: ./otelcol-dev
-
-exporters:
-  - gomod:
-      # NOTE: Prior to v0.86.0 use the `loggingexporter` instead of `debugexporter`.
-      go.opentelemetry.io/collector/exporter/debugexporter v0.125.0
-  - gomod:
-      go.opentelemetry.io/collector/exporter/otlpexporter v0.125.0
-
-processors:
-  - gomod:
-      go.opentelemetry.io/collector/processor/batchprocessor v0.125.0
-
-receivers:
-  - gomod:
-      go.opentelemetry.io/collector/receiver/otlpreceiver v0.125.0
-
-providers:
-  - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.18.0
-  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.18.0
-  - gomod: go.opentelemetry.io/collector/confmap/provider/httpprovider v1.18.0
-  - gomod: go.opentelemetry.io/collector/confmap/provider/httpsprovider v1.18.0
-  - gomod: go.opentelemetry.io/collector/confmap/provider/yamlprovider v1.18.0
-
-```
-
-## Config for the deployed Collector _instance_
-
-At this point, we have a Collector _distribution_, whether prebuilt or customized. Now, we'll deploy a Collector _instance_.
-
-The distribution used at deploy determines which components (and some other options) are available for building pipelines. Those will be selectively included in the actual Collector [configuration](https://opentelemetry.io/docs/collector/configuration/#basics) file, in this standard format (see below for Docker deploy):
-
-```yaml
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 127.0.0.1:4317
-      http:
-        endpoint: 127.0.0.1:4318
-
-processors:
-  batch:
-
-exporters:
-  otlp:
-    endpoint: otelcol:4317
-  custom_exporter:
-
-extensions:
-  health_check:
-  pprof:
-  zpages:
-
-service:
-  extensions: [health_check, pprof, zpages]
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlp]
-    metrics:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlp]
-    logs:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlp]
-
-```
-
->Local grpc and http receiver ports may be specified as `localhost` instead of `127.0.0.1`.
-
-For Docker deploys, reference the ports as:
-
-```yaml
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: my-hostname:4317 # Use the same hostname from your docker run command
-
-```
-
-Typically, the Collector configuration file name is `otelcol.yaml` but as long as the `--config` flag references `/path/to/config-filename.yaml` a different name is just as good.
-
----
+The otelex uses a basic configuration: [`config/otelcol-config.yaml`](https://github.com/msyvr/otelex/blob/main/config/otelcol-config.yaml)
 
 ## Deploy Collector instances
 
-The manifest is provided to the `--config` flag when the run command for the Collector instance is executed, whether locally or containerized (Docker/Kubernetes).
-
-Local deploy is generally limited to dev testing. Docker deploys are easy enough, so defaulting to using those locally is a fine option, too.
-
-### Local deploy
-
-Locally, run the binary with the `config` flag:
+The manifest is provided to the `--config` flag when the run command for the Collector instance is executed. Locally, run the binary at `otelcol/custom-build` with manifest at `/path/to/collector-config.yaml` as:
 
 ```bash
 otelcol-custom --config /path/to/config-filename.yaml
@@ -297,31 +166,34 @@ otelcol-custom --config /path/to/config-filename.yaml
 
 >Chained config flags are merged: Multiple `--config` flags will be merged into a single configuration; if the merger doesn't yield a complete configuration, the command will error.
 
-Alternatives for loading the configuration include environment variables:
+Alternatives for loading the configuration include - 
 
+**environment variables:**
 ```bash
-otelcol-custom --config=env:OTELCOL_CUSTOM_CONFIG
+otelcol/custom-build --config=env:OTELCOL_CUSTOM_CONFIG
 ```
-... YAML strings:
+**YAML strings:**
 ```bash
-otelcol-custom --config=https://my-domain.com/config-filename.yaml
+otelcol/custom-build --config="yaml:exporters::custom-exporter"
 ```
-... or external URLs:
+**external URLs:**
 ```bash
-otelcol-custom --config="yaml:exporters::custom-exporter"
+otelcol/custom-build --config=https://my-domain.com/collector-config.yaml
 ```
 
 ### Docker deploy
 
-When the Collector is deployed using Docker, the manifest file can be mounted as a volume on launch:
+When the Collector is deployed using a pre-built Docker image `otelcol-custom:latest`, the manifest file can be mounted as a volume on launch:
 
 ```bash
-docker run -v /path/to/config-filename.yaml:/etc/otelcol-custom/config.yaml otelcol-custom:latest
+docker run -v /path/to/collector-config.yaml:/etc/otelcol-custom/config.yaml otelcol-custom:latest
 ```
 
----
+The image needs to be built first, of course. This deserves a note for the case where unpublished components need to be included. The component may be unpublished for a reason and a multistage Docker build can be used to avoid exposing the custom component files.
+
+The image will be built locally in the environment where the component files can be accessed directly, so they can be copied into a (non-final) stage of the Docker build. There, the distribution that includes that custom component is built, referencing the files. However, a subsequent stage involves copying in only the distribution binary. That way, the final (persistent) image exposes the distribution binary without exposing the individual component.
 
 ## Visualization
 
-- [jaeger](https://www.jaegertracing.io/)
-- [otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer?tab=readme-ov-file)
+Visualization options include open source tools and third party providers. Provisioned here is a [Jaeger](https://www.jaegertracing.io/) Docker image to run locally: `sh/jaeger.sh`
+
