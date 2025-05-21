@@ -20,11 +20,11 @@ To test this on export to a real database, BigQuery is used here. The `internal/
 
 - [x] write the custom exporter component
 - [x] create the custom collector build manifest that includes the custom exporter
-- [ ] build the custom collector distribution (use OTel's `ocb`)
+- [x] build the custom collector distribution (use OTel's `ocb`)
 - [ ] instrument a test service to emit at least two streams of data: 
   - [ ] observability traces 
   - [ ] key-value pairs bundled into span attributes
-- [ ] deploy an instance of the custom collector distribution (docker)
+- [x] deploy an instance of the custom collector distribution (docker)
 - [x] prep an observability data inspection tool (e.g., locally, Jaeger)
 - [ ] evaluate collector performance limits
   - [ ] test for ingest rate limits
