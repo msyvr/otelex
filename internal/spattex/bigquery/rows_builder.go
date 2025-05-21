@@ -26,7 +26,8 @@ func buildRows(td ptrace.Traces) []bigqueryrow {
 			for k := 0; k < spans.Len(); k++ {
 				span := spans.At(k)
 				row := bigqueryrow{
-					"name": span.Name(),
+					"name":                 span.Name(),
+					tablePartitionFieldKey: span.StartTimestamp(),
 				}
 				// Span attributes exist at both the 'resource' (i.e., parent trace) level
 				// and at the individual span level.

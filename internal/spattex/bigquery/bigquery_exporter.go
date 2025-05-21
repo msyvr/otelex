@@ -142,13 +142,13 @@ func (sender *bigquerySender) sendRows(ctx context.Context, rows []bigqueryrow) 
 			fmt.Println("Retrying insert")
 			return table.Inserter().Put(ctx, rows)
 		}
-		return err
 	}
+	return err
 }
 
 // Attempt to update the target table schema when new fields are identified.
 // If no BigQuery type maps to the span value type, block the export.
-func (s *bigquerySender) updateSchema(ctx context.Context, table *bigquery.Table, rows []bqrow) error {
+func (s *bigquerySender) updateSchema(ctx context.Context, table *bigquery.Table, rows []bigqueryrow) error {
 	// If data contains field(s) not present in the target table schema, update the schema using the first
 	// matching type for each. If the update is unsuccessful for any fields in a trace, the table will reject
 	// the entire trace aka data row.
