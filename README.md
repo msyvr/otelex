@@ -14,17 +14,17 @@ The Collector is designed to process [OTLP](https://opentelemetry.io/docs/specs/
 
 ### Custom exporter capabilities
 
-To test this on export to a real database, BigQuery is used here. The `internal/spattex/bigquery` exporter verifies that the each span's attributes (key-value pairs) align with the target database schema. The key-value pairs are extracted to a map. Those maps are equivalent to rows for export to BigQuery and batches of rows are exported for insertion into the receiving table.
+To test this on export to a real database, BigQuery is used here. The `internal/spattex/bigquery` exporter verifies that each span's attributes (key-value pairs) align with the target database schema. The key-value pairs are extracted to a map. Those maps are equivalent to rows for export to BigQuery and batches of rows are exported for insertion into the receiving table.
 
 ### Project outline
 
 - [x] write the custom exporter component
 - [x] create the custom collector build manifest that includes the custom exporter
-- [ ] build the custom collector distribution (use OTel's `ocb`)
+- [x] build the custom collector distribution (use OTel's `ocb`)
 - [ ] instrument a test service to emit at least two streams of data: 
   - [ ] observability traces 
   - [ ] key-value pairs bundled into span attributes
-- [ ] deploy an instance of the custom collector distribution (docker)
+- [x] deploy an instance of the custom collector distribution (docker)
 - [x] prep an observability data inspection tool (e.g., locally, Jaeger)
 - [ ] evaluate collector performance limits
   - [ ] test for ingest rate limits
