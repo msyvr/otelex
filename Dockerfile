@@ -1,6 +1,6 @@
 FROM golang:alpine AS builder
 
-WORKDIR $GOPATH/src/msyvr/otelex
+WORKDIR /
 
 COPY go.mod go.mod
 COPY go.sum go.sum
